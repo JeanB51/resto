@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Montreal Restaurants — Tastet & The Main</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1a1a2e; color: #eee; height: 100vh; display: flex; flex-direction: column; }
+
+    header {
+      padding: 12px 20px;
+      background: #16213e;
+      border-bottom: 1px solid #0f3460;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    header h1 { font-size: 1.2rem; font-weight: 700; color: #e94560; white-space: nowrap; }
+    header p  { font-size: 0.78rem; color: #aaa; }
+
+    #controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-left: auto;
+    }
+
+    .legend {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      user-select: none;
+      padding: 3px 8px;
+      border-radius: 4px;
+      transition: background 0.2s;
+    }
+    .legend-item:hover { background: rgba(255,255,255,0.08); }
+    .legend-item.dimmed { opacity: 0.35; }
+    .legend-dot {
+      width: 13px; height: 13px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.4);
+      flex-shrink: 0;
+    }
+
+    #search-box {
+      padding: 5px 10px;
+      border-radius: 6px;
+      border: 1px solid #0f3460;
+      background: #0f3460;
+      color: #eee;
+      font-size: 0.82rem;
+      width: 180px;
+    }
+    #search-box::placeholder { color: #888; }
+
+    #map { flex: 1; }
+
+    /* Popup styling */
+    .leaflet-popup-content-wrapper {
+      background: #16213e;
+      color: #eee;
+      border: 1px solid #0f3460;
+      border-radius: 8px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    }
+    .leaflet-popup-tip { background: #16213e; }
+    .leaflet-popup-content { margin: 12px 16px; min-width: 200px; }
+
+    .popup-name {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+      color: #fff;
+    }
+    .popup-badge {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 20px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: #fff;
+    }
+    .popup-row {
+      font-size: 0.78rem;
+      color: #bbb;
+      margin: 2px 0;
+      display: flex;
+      gap: 6px;
+    }
+    .popup-row span:first-child { color: #888; min-width: 60px; }
+    .popup-source {
+      margin-top: 8px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .src-tag {
+      padding: 1px 7px;
+      border-radius: 3px;
+      font-size: 0.68rem;
+      font-weight: 600;
+      background: #0f3460;
+      color: #7ec8e3;
+    }
+
+    #count-bar {
+      padding: 5px 20px;
+      background: #0f1b2d;
+      font-size: 0.75rem;
+      color: #666;
+      border-top: 1px solid #0f3460;
+    }
+    #count-bar span { color: #aaa; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Montreal Restaurants</h1>
+    <p>Sources: tastet.ca &amp; themain.com — color-coded by newness</p>
+  </div>
+  <div id="controls">
+    <input id="search-box" type="text" placeholder="Search restaurant…">
+    <div class="legend">
+      <div class="legend-item" data-era="2026" title="Toggle 2026 openings">
+        <div class="legend-dot" style="background:#e94560;"></div>2026 (newest)
+      </div>
+      <div class="legend-item" data-era="2025" title="Toggle 2025 openings">
+        <div class="legend-dot" style="background:#ff8c00;"></div>2025
+      </div>
+      <div class="legend-item" data-era="2024" title="Toggle 2024 openings">
+        <div class="legend-dot" style="background:#f0c040;"></div>2024
+      </div>
+      <div class="legend-item" data-era="classic" title="Toggle classic/established">
+        <div class="legend-dot" style="background:#4fc3f7;"></div>Classic
+      </div>
+    </div>
+  </div>
+</header>
+
+<div id="map"></div>
+<div id="count-bar">Showing <span id="visible-count">0</span> restaurants</div>
+
+<script>
+// ─── Data ────────────────────────────────────────────────────────────────────
+const ERA_COLORS = {
+  "2026":    { fill: "#e94560", label: "2026 (Newest)" },
+  "2025":    { fill: "#ff8c00", label: "2025" },
+  "2024":    { fill: "#f0c040", label: "2024" },
+  "classic": { fill: "#4fc3f7", label: "Classic / Established" },
+};
+
+const restaurants = [
+  // ── 2026 ──────────────────────────────────────────────────────────────────
+  {
+    name: "Bincho",
+    era: "2026",
+    date: "Feb 2026",
+    address: "Mont-Royal Ave, Plateau-Mont-Royal",
+    cuisine: "Japanese-French fusion",
+    lat: 45.5262, lng: -73.5789,
+    sources: ["Tastet","The Main"],
+    notes: "Former Le Pontiac space"
+  },
+  {
+    name: "Figata",
+    era: "2026",
+    date: "Early 2026",
+    address: "Notre-Dame St",
+    cuisine: "Italo-American / NY-style trattoria",
+    lat: 45.4885, lng: -73.5590,
+    sources: ["Tastet"],
+  },
+  {
+    name: "Hana Korean Steakhouse",
+    era: "2026",
+    date: "Jan 15, 2026",
+    address: "301 Rue Lemoyne, Old Montreal",
+    cuisine: "Korean steakhouse / BBQ",
+    lat: 45.5045, lng: -73.5538,
+    sources: ["Tastet"],
+  },
+  {
+    name: "Bar Mamie (2nd location)",
+    era: "2026",
+    date: "Feb 18, 2026",
+    address: "Mont-Royal Ave, Plateau-Mont-Royal",
+    cuisine: "French bistro / casual",
+    lat: 45.5268, lng: -73.5775,
+    sources: ["Tastet"],
+  },
+  {
+    name: "Passé Composé (2nd location)",
+    era: "2026",
+    date: "Feb 14, 2026",
+    address: "Plateau-Mont-Royal",
+    cuisine: "Brunch / French bistro",
+    lat: 45.5248, lng: -73.5801,
+    sources: ["Tastet"],
+  },
+  {
+    name: "Yakitori Hibahihi",
+    era: "2026",
+    date: "2026",
+    address: "6580A Saint-Hubert, Rosemont–La Petite-Patrie",
+    cuisine: "Japanese izakaya / yakitori",
+    lat: 45.5459, lng: -73.5797,
+    sources: ["Tastet"],
+  },
+  {
+    name: "Maison Bao",
+    era: "2026",
+    date: "Jan 2026",
+    address: "Downtown Montreal",
+    cuisine: "Chinese (baozi / bao)",
+    lat: 45.5088, lng: -73.5711,
+    sources: ["Tastet"],
+  },
+
+  // ── 2025 ──────────────────────────────────────────────────────────────────
+  {
+    name: "Le Violon",
+    era: "2025",
+    date: "Jun 2024 / featured 2025",
+    address: "4720 Rue Marquette, Plateau-Mont-Royal",
+    cuisine: "Modern French / Italian / Spanish, seafood-forward",
+    lat: 45.5278, lng: -73.5742,
+    sources: ["Tastet","The Main"],
+    notes: "#2 Air Canada Best New 2025; Michelin Recommended"
+  },
+  {
+    name: "Pasta Pooks",
+    era: "2025",
+    date: "2025",
+    address: "6704 Clark, Little Italy",
+    cuisine: "Fresh handmade pasta / Italian-Sardinian",
+    lat: 45.5367, lng: -73.6060,
+    sources: ["Tastet","The Main"],
+    notes: "#9 Air Canada Best New 2025; tiny room, high demand"
+  },
+  {
+    name: "Rôtisserie La Lune",
+    era: "2025",
+    date: "Dec 2024 / early 2025",
+    address: "391 Rue Saint-Zotique E., Rosemont–La Petite-Patrie",
+    cuisine: "Quebec-style rotisserie",
+    lat: 45.5371, lng: -73.5847,
+    sources: ["Tastet","The Main"],
+    notes: "From Mon Lapin team; Michelin Bib Gourmand 2025"
+  },
+  {
+    name: "Restaurant Limbo",
+    era: "2025",
+    date: "Mar 26, 2025",
+    address: "45 Mozart Ouest, Mile-Ex (former Marconi space)",
+    cuisine: "Contemporary / small plates",
+    lat: 45.5315, lng: -73.6181,
+    sources: ["Tastet","The Main"],
+    notes: "Chef Harrison Shewchuk; Air Canada 2025 longlist"
+  },
+  {
+    name: "Mezcla",
+    era: "2025",
+    date: "Nov 6, 2025",
+    address: "410 Rue de Vaudreuil, Old Montreal",
+    cuisine: "French-Peruvian / Fine dining tasting menu",
+    lat: 45.5022, lng: -73.5570,
+    sources: ["The Main"],
+    notes: "10-course blind tasting menu ~$129; 24 seats"
+  },
+  {
+    name: "Chez Greenberg",
+    era: "2025",
+    date: "Jan 2025",
+    address: "5159 Avenue du Parc, Mile-End",
+    cuisine: "Jewish deli / Ashkenazi comfort food",
+    lat: 45.5195, lng: -73.6012,
+    sources: ["The Main"],
+    notes: "Bagels, smoked salmon, knishes, latkes"
+  },
+  {
+    name: "Flamme du Sichuan",
+    era: "2025",
+    date: "2025",
+    address: "1710 Rue Saint-Denis, Downtown",
+    cuisine: "Sichuan Chinese",
+    lat: 45.5137, lng: -73.5705,
+    sources: ["The Main"],
+    notes: "No reservations; authentic mala"
+  },
+  {
+    name: "Grille-Nature",
+    era: "2025",
+    date: "Late Nov 2025",
+    address: "Dollard-des-Ormeaux (West Island)",
+    cuisine: "Charcoal grill / Rotisserie / Market-driven",
+    lat: 45.4717, lng: -73.8189,
+    sources: ["Tastet","The Main"],
+    notes: "Derek Dammann & David McMillan project"
+  },
+  {
+    name: "Celeste",
+    era: "2025",
+    date: "Late Nov 2025",
+    address: "Maison Alcan, Downtown",
+    cuisine: "Italian-Mediterranean",
+    lat: 45.5047, lng: -73.5752,
+    sources: ["The Main"],
+    notes: "Beatrice Hospitality Group; pastas, crudo, grilled seafood"
+  },
+  {
+    name: "Kif Kif",
+    era: "2025",
+    date: "Late 2025",
+    address: "Westmount",
+    cuisine: "Mediterranean / Tel Aviv & Ionian coast",
+    lat: 45.4839, lng: -73.6039,
+    sources: ["The Main"],
+  },
+  {
+    name: "La Cave du Parapluie",
+    era: "2025",
+    date: "Late 2025",
+    address: "Beaubien area, Rosemont–La Petite-Patrie",
+    cuisine: "Seafood / Natural wine bar",
+    lat: 45.5347, lng: -73.6060,
+    sources: ["The Main"],
+    notes: "Walk-ins only; sommelier Karelle Voyer"
+  },
+  {
+    name: "Bayrut",
+    era: "2025",
+    date: "Sept–Oct 2025",
+    address: "727 Rue William, Griffintown",
+    cuisine: "Lebanese",
+    lat: 45.4927, lng: -73.5698,
+    sources: ["The Main"],
+    notes: "Zero-fry philosophy; mleheyee, hummus"
+  },
+  {
+    name: "Pizzeria Locali",
+    era: "2025",
+    date: "Sept–Oct 2025",
+    address: "Saint-Zotique, Petite Patrie",
+    cuisine: "New York-style pizza",
+    lat: 45.5375, lng: -73.5910,
+    sources: ["The Main"],
+    notes: "From NO.900 team"
+  },
+  {
+    name: "Motto Handroll Bar",
+    era: "2025",
+    date: "Sept–Oct 2025",
+    address: "Old Montreal",
+    cuisine: "Japanese / Temaki handrolls",
+    lat: 45.5030, lng: -73.5548,
+    sources: ["The Main"],
+  },
+  {
+    name: "Molenne",
+    era: "2025",
+    date: "Feb 2025",
+    address: "Saint-Laurent Blvd (The Main), Mile-End",
+    cuisine: "Montreal brasserie / seafood & Quebec meats",
+    lat: 45.5261, lng: -73.5979,
+    sources: ["Tastet","The Main"],
+    notes: "Former Café Mei space"
+  },
+  {
+    name: "Sushi Nishinokaze",
+    era: "2025",
+    date: "2025",
+    address: "Mile-End",
+    cuisine: "Edomae omakase sushi (8 seats)",
+    lat: 45.5240, lng: -73.5990,
+    sources: ["Tastet","The Main"],
+  },
+  {
+    name: "Panacée",
+    era: "2025",
+    date: "2025",
+    address: "Atateken St, The Village",
+    cuisine: "Contemporary / tasting counter",
+    lat: 45.5153, lng: -73.5538,
+    sources: ["Tastet","The Main"],
+  },
+  {
+    name: "Myers",
+    era: "2025",
+    date: "2025",
+    address: "Outremont",
+    cuisine: "Contemporary / modern lunch & private dining",
+    lat: 45.5178, lng: -73.6092,
+    sources: ["Tastet"],
+  },
+  {
+    name: "PREZZE MOLLO",
+    era: "2025",
+    date: "2025",
+    address: "Mile-End",
+    cuisine: "Italian / aperitivo / casual",
+    lat: 45.5249, lng: -73.5995,
+    sources: ["Tastet"],
+  },
+  {
+    name: "Disco Mayo",
+    era: "2025",
+    date: "2025",
+    address: "Clark St, Little Italy",
+    cuisine: "Italian-inspired bottega / casual",
+    lat: 45.5372, lng: -73.6063,
+    sources: ["Tastet"],
+  },
+  {
+    name: "BALBOA",
+    era: "2025",
+    date: "Jun 2025",
+    address: "Saint-Paul St, Old Montreal",
+    cuisine: "Italian",
+    lat: 45.5042, lng: -73.5560,
+    sources: ["Tastet"],
+  },
+  {
+    name: "Bar Luz",
+    era: "2025",
+    date: "2025",
+    address: "Outremont (next to Alma)",
+    cuisine: "Mexican (fonda fina concept)",
+    lat: 45.5169, lng: -73.6083,
+    sources: ["Tastet","The Main"],
+  },
+  {
+    name: "Le Siamo Noi",
+    era: "2025",
+    date: "Apr 10, 2025",
+    address: "Royalmount, TMR",
+    cuisine: "Italian (Novantuno Hospitality)",
+    lat: 45.4968, lng: -73.6381,
+    sources: ["Tastet"],
+  },
+  {
+    name: "Momiji",
+    era: "2025",
+    date: "2025",
+    address: "Royalmount, TMR",
+    cuisine: "Japanese (Otto Group)",
+    lat: 45.4972, lng: -73.6388,
+    sources: ["Tastet"],
+  },
+  {
+    name: "Mare",
+    era: "2025",
+    date: "2025",
+    address: "Old Port of Montreal",
+    cuisine: "High-end gastronomy / seafood",
+    lat: 45.5035, lng: -73.5530,
+    sources: ["Tastet","The Main"],
+  },
+  {
+    name: "Oncle Lee Kăo",
+    era: "2025",
+    date: "Late Jan 2025",
+    address: "McGill St, Old Montreal",
+    cuisine: "Modern Chinese-American",
+    lat: 45.5041, lng: -73.5585,
+    sources: ["Tastet"],
+    notes: "Former Ikanos/Garde-Côte space"
+  },
+  {
+    name: "L'Express (reopened)",
+    era: "2025",
+    date: "Sep 19, 2025",
+    address: "3927 Rue Saint-Denis, Plateau-Mont-Royal",
+    cuisine: "Classic French brasserie (post-renovation)",
+    lat: 45.5228, lng: -73.5774,
+    sources: ["The Main"],
+    notes: "Opened 1980; new chef Marc-Antoine Lacasse; Michelin Bib Gourmand"
+  },
+
+  // ── 2024 ──────────────────────────────────────────────────────────────────
+  {
+    name: "Sabayon",
+    era: "2024",
+    date: "2023 / #1 enRoute 2024",
+    address: "Centre St, Pointe-Saint-Charles",
+    cuisine: "Tasting menu / Seasonal Quebec",
+    lat: 45.4736, lng: -73.5612,
+    sources: ["The Main"],
+    notes: "14-seat micro-restaurant; Michelin Star 2024; Chef Patrice Demers"
+  },
+  {
+    name: "Parapluie",
+    era: "2024",
+    date: "2023–2024 / #6 enRoute 2024",
+    address: "44 Rue Beaubien Ouest, Little Italy / Rosemont",
+    cuisine: "Seafood-forward French",
+    lat: 45.5348, lng: -73.6055,
+    sources: ["The Main"],
+    notes: "Chef Robin Filteau Boucher; 32 seats; Canada's 100 Best"
+  },
+  {
+    name: "Oncle Lee",
+    era: "2024",
+    date: "2024",
+    address: "Laurier Ouest, Outremont",
+    cuisine: "Modern Chinese",
+    lat: 45.5167, lng: -73.6075,
+    sources: ["Tastet"],
+    notes: "Original location (see also Oncle Lee Kăo for 2025 Old Montreal branch)"
+  },
+  {
+    name: "Pinophyta",
+    era: "2024",
+    date: "2024",
+    address: "Downtown Montreal",
+    cuisine: "Cantonese / Sichuan",
+    lat: 45.5081, lng: -73.5715,
+    sources: ["The Main"],
+    notes: "Clay pot rice with lap cheong"
+  },
+  {
+    name: "HENI",
+    era: "2024",
+    date: "2024",
+    address: "Little Burgundy",
+    cuisine: "Contemporary",
+    lat: 45.4872, lng: -73.5706,
+    sources: ["The Main"],
+    notes: "enRoute 2024 longlist"
+  },
+  {
+    name: "Île-de-France",
+    era: "2024",
+    date: "2024",
+    address: "9th floor, Eaton Centre, Downtown",
+    cuisine: "French",
+    lat: 45.5085, lng: -73.5694,
+    sources: ["The Main"],
+    notes: "enRoute 2024 longlist"
+  },
+
+  // ── Classic / Established ─────────────────────────────────────────────────
+  {
+    name: "Mon Lapin",
+    era: "classic",
+    date: "~2018",
+    address: "150 Rue Saint-Zotique E., Mile-Ex",
+    cuisine: "Contemporary shared plates / natural wine",
+    lat: 45.5328, lng: -73.6166,
+    sources: ["Tastet"],
+    notes: "#2 North America, 50 Best; #1 Canada's 100 Best (twice)"
+  },
+  {
+    name: "Hoogan et Beaufort",
+    era: "classic",
+    date: "2015",
+    address: "4095 Rue Molson, Rosemont (former train factory)",
+    cuisine: "Refined Quebec cuisine",
+    lat: 45.5467, lng: -73.5530,
+    sources: ["Tastet"],
+  },
+  {
+    name: "L'Express",
+    era: "classic",
+    date: "1980",
+    address: "3927 Rue Saint-Denis, Plateau-Mont-Royal",
+    cuisine: "Classic French brasserie",
+    lat: 45.5228, lng: -73.5774,
+    sources: ["Tastet","The Main"],
+    notes: "Menu essentially unchanged for 40+ years; Michelin Bib Gourmand"
+  },
+  {
+    name: "Liverpool House",
+    era: "classic",
+    date: "~2008",
+    address: "Little Burgundy",
+    cuisine: "Hearty French-Canadian",
+    lat: 45.4868, lng: -73.5715,
+    sources: ["Tastet"],
+    notes: "Sibling of Joe Beef; Barack Obama dined here"
+  },
+  {
+    name: "La Buvette Chez Simone",
+    era: "classic",
+    date: "2008",
+    address: "Mile-End",
+    cuisine: "Wine bar / small plates",
+    lat: 45.5255, lng: -73.5982,
+    sources: ["Tastet"],
+  },
+  {
+    name: "Leméac",
+    era: "classic",
+    date: "~2001",
+    address: "Laurier Ave, Outremont",
+    cuisine: "French brasserie",
+    lat: 45.5171, lng: -73.6068,
+    sources: ["Tastet"],
+    notes: "25th anniversary 2026"
+  },
+];
+
+// ─── Map Init ─────────────────────────────────────────────────────────────────
+const map = L.map('map', {
+  center: [45.5131, -73.5761],
+  zoom: 13,
+  zoomControl: true,
+});
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+  subdomains: 'abcd',
+  maxZoom: 19
+}).addTo(map);
+
+// ─── Markers ──────────────────────────────────────────────────────────────────
+function makeIcon(era) {
+  const c = ERA_COLORS[era].fill;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 36" width="24" height="36">
+    <path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 24 12 24S24 21 24 12C24 5.4 18.6 0 12 0z"
+          fill="${c}" stroke="rgba(0,0,0,0.5)" stroke-width="1.5"/>
+    <circle cx="12" cy="12" r="5" fill="rgba(255,255,255,0.85)"/>
+  </svg>`;
+  return L.divIcon({
+    html: svg,
+    className: '',
+    iconSize: [24, 36],
+    iconAnchor: [12, 36],
+    popupAnchor: [0, -36],
+  });
+}
+
+function makePopup(r) {
+  const color = ERA_COLORS[r.era].fill;
+  const srcs = r.sources.map(s => `<span class="src-tag">${s}</span>`).join('');
+  const notes = r.notes ? `<div class="popup-row"><span>Note</span><span>${r.notes}</span></div>` : '';
+  return `
+    <div class="popup-name">${r.name}</div>
+    <span class="popup-badge" style="background:${color}">${ERA_COLORS[r.era].label}</span>
+    <div class="popup-row"><span>Opened</span><span>${r.date}</span></div>
+    <div class="popup-row"><span>Cuisine</span><span>${r.cuisine}</span></div>
+    <div class="popup-row"><span>Location</span><span>${r.address}</span></div>
+    ${notes}
+    <div class="popup-source">${srcs}</div>
+  `;
+}
+
+// Jitter overlapping markers slightly
+const coordCount = {};
+restaurants.forEach(r => {
+  const key = `${r.lat.toFixed(4)},${r.lng.toFixed(4)}`;
+  coordCount[key] = (coordCount[key] || 0) + 1;
+});
+const coordIdx = {};
+restaurants.forEach(r => {
+  const key = `${r.lat.toFixed(4)},${r.lng.toFixed(4)}`;
+  coordIdx[key] = (coordIdx[key] || 0) + 1;
+  const total = coordCount[key];
+  if (total > 1) {
+    const angle = (2 * Math.PI * coordIdx[key]) / total;
+    r._lat = r.lat + 0.0005 * Math.sin(angle);
+    r._lng = r.lng + 0.0005 * Math.cos(angle);
+  } else {
+    r._lat = r.lat;
+    r._lng = r.lng;
+  }
+});
+
+const markers = restaurants.map(r => {
+  const m = L.marker([r._lat, r._lng], { icon: makeIcon(r.era) })
+    .bindPopup(makePopup(r), { maxWidth: 280 });
+  m._restaurant = r;
+  m.addTo(map);
+  return m;
+});
+
+// ─── Legend toggle ────────────────────────────────────────────────────────────
+const activeEras = new Set(["2026","2025","2024","classic"]);
+
+function updateVisible() {
+  let count = 0;
+  const q = document.getElementById('search-box').value.toLowerCase();
+  markers.forEach(m => {
+    const r = m._restaurant;
+    const eraOn = activeEras.has(r.era);
+    const searchMatch = !q || r.name.toLowerCase().includes(q)
+      || r.cuisine.toLowerCase().includes(q)
+      || r.address.toLowerCase().includes(q);
+    if (eraOn && searchMatch) {
+      if (!map.hasLayer(m)) m.addTo(map);
+      count++;
+    } else {
+      if (map.hasLayer(m)) map.removeLayer(m);
+    }
+  });
+  document.getElementById('visible-count').textContent = count;
+}
+
+document.querySelectorAll('.legend-item').forEach(el => {
+  el.addEventListener('click', () => {
+    const era = el.dataset.era;
+    if (activeEras.has(era)) {
+      activeEras.delete(era);
+      el.classList.add('dimmed');
+    } else {
+      activeEras.add(era);
+      el.classList.remove('dimmed');
+    }
+    updateVisible();
+  });
+});
+
+document.getElementById('search-box').addEventListener('input', updateVisible);
+
+updateVisible();
+</script>
+</body>
+</html>
