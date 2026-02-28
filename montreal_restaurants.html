@@ -623,7 +623,7 @@ const map = L.map('map', {
   zoomControl: true,
 });
 
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
   subdomains: 'abcd',
   maxZoom: 19
@@ -684,7 +684,9 @@ restaurants.forEach(r => {
 
 const markers = restaurants.map(r => {
   const m = L.marker([r._lat, r._lng], { icon: makeIcon(r.era) })
-    .bindPopup(makePopup(r), { maxWidth: 280 });
+    .bindPopup(makePopup(r), { maxWidth: 280 })
+    .on('mouseover', function() { this.openPopup(); })
+    .on('mouseout', function() { this.closePopup(); });
   m._restaurant = r;
   m.addTo(map);
   return m;
